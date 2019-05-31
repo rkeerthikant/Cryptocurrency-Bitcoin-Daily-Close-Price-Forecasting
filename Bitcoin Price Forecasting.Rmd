@@ -1,0 +1,213 @@
+---
+title: "Bitcoin Price Forecasting"
+author: "Keerthikant"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#####  The data we have considered is from Apr 23 2013 to May 9, 2019. I have extracted the data from the website (https://coinmarketcap.com/).
+
+##### Forecast is a generic function for forecasting from time series or time series models. The function invokes particular methods which depend on the class of the first argument.
+
+##### Naniar package is used to plot heatmap to check missing values in the data
+
+##### Lubridate package is used for to work with dates and times
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+setwd('C:/Users/keert/Documents/Keerthi/Personal/ML/Time series/bitcoin/Code')
+library(forecast)
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+library(naniar)
+library(tseries)
+```
+
+##### Let's load the input file which is the training file provided in the bitcoin dataset.
+
+```{r echo=TRUE}
+train_data=read.csv('C:/Users/keert/Documents/Keerthi/Personal/ML/Time series/bitcoin/Data/Bitcoin_Train_Data.csv',header=TRUE)
+test_data=read.csv('C:/Users/keert/Documents/Keerthi/Personal/ML/Time series/bitcoin/Data/Bitcoin_Test_Data.csv',header=TRUE)
+
+```
+
+##### Initial checks to convert date field so that we can work on time series models.
+
+```{r echo=TRUE}
+str(train_data)
+
+train_data$Date <- mdy(train_data$Date)
+test_data$Date <- mdy(test_data$Date)
+
+train_data$Volume = gsub('-','0',train_data$Volume)
+train_data$Volume = as.numeric(train_data$Volume)
+
+```
+
+##### Initial summaries to see any outliers in any of the columns
+
+```{r echo=TRUE}
+head(train_data)
+summary(train_data)
+```
+
+##### Plotting heatmap to check for missing data
+
+```{r echo=TRUE}
+#Heat map to check any missing data
+vis_miss(train_data)
+```
+
+* The data is clean. There are no missing element. There is nothing unusual about the data.
+
+##### We plot the initial bitcoin close price for each day from Apr 2013 to May 2019.
+
+```{r echo= TRUE}
+plot(train_data$Close~train_data$Date,xlab='Date',ylab ='Daily Bitcoin Close Price in USD',
+     main='Bitcoin price plot', type='l',lwd=2,col='blue')
+```
+
+### We proceed with next steps to make the data stationary to apply time series models -
+* astsa package is used for applied stastical time series models 
+* Creating timeseries data using ts()
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(astsa)
+
+bit_train<-ts(train_data$Close)
+bit_test<-ts(test_data$Close)
+
+```
+
+```{r echo=TRUE}
+
+par(mfrow=c(2,2))
+
+plot(bit_train, main='Daily Close Prices of Bitcoin in USD', ylab='', col='blue', lwd=2)
+plot(log(bit_train), main='Log-transorm of Close Prices', ylab='', col='red', lwd=2)
+plot(diff(log(bit_train)), main='Differenced Log-transorm of Close Prices', ylab='', col='brown', lwd=2)
+plot(diff(diff(log(bit_train)),12), main='Log-transorm without trend and seasonaliy', ylab='', col='green', lwd=2)
+
+```
+
+* We notice that our data is non-stationary, we apply log-return method to make it stationary.
+* Log return is achieved by diff(log())
+* We plot 4 graphs in efforts to see if log-return methods makes the data stationary before we apply AR or MA or ARMA or ARIMA models.
+
+##### Performing Ljung-Box test for correlation
+
+```{r echo=TRUE}
+Box.test(diff(log(bit_train)), lag = log(length(diff(log(bit_train)))),type ='Ljung-Box')
+```
+
+* We can notice that p < 0.05, there exists some correlation with the close price of the bitcoin
+
+##### We perform dickey-fuller test to determine stationary in the data
+
+```{r echo=TRUE}
+adf.test(diff(log(bit_train)), alternative="stationary", k=0)
+```
+
+* We can conclude that there is no stationarity from above p-value
+
+##### Auto Correlation Function (ACF) and Partial Auto Correlation Function (PACF) of the differenced data is observed to get the p,d,q values.
+
+```{r echo=TRUE}
+
+par(mfrow=c(1,2))
+acf(diff(log(bit_train)), main='ACF of log differenced data', 100)
+pacf(diff(log(bit_train)), main='PACF of log differenced data', 100)
+
+```
+
+##### We fit arima(4,1,3) model with seasonal component included in it, below plot shows the predictions
+
+```{r echo=TRUE}
+
+fit <- arima(log(bit_train), c(4, 1, 3),seasonal = list(order = c(1, 1, 1), period = 3))
+pred <- predict(fit, n.ahead = 10*3)
+ts.plot(bit_train,2.718^pred$pred, lty = c(1,5),col=c(3,2),lwd=c(2,3))
+grid(nx = NULL, ny = NULL, col = "darkgray", lty = 2,lwd = par("lwd"), equilogs = TRUE)
+
+```
+
+* We have also used auto.arima() to check the p,d,q which complements the ACF and PACF graphs
+
+### We now proceed with Exponential Smoothing Methods
+##### 1. Simple Exponential Smoothing  
+##### 2. Holt's Linear Trend Method  
+##### 3. Damped Holt's Method  
+
+* We have reduced the window size for the time series to start from observation number= 2000 for graph plotting purposes.
+
+##### We notice that AIC is 3122 and MAPE=2.009 for Simple Exponential Smoothing
+
+```{r echo=TRUE}
+close_ses <- ses(window(bit_train,start=2000),h=5)
+summary(close_ses)
+
+autoplot(close_ses) +
+  autolayer(fitted(close_ses), series="Fitted") +
+  ylab("Bitcoin Close Price") + xlab("ID number")
+```
+
+##### We notice that AIC is 3123 and MAPE=2.024 for Holt's method
+
+```{r echo=TRUE}
+close_holt<-holt(window(bit_train,start=2000),h=5)
+
+summary(close_holt)
+
+autoplot(close_holt) +
+  autolayer(fitted(close_holt), series="Fitted") +
+  ylab("Bitcoin Close Price") + xlab("ID number")
+```
+
+##### We notice that AIC is 3121 and MAPE=1.9867 for Damped Holt's method. This has the lowest MAPE as compared to above methods.
+
+```{r echo= TRUE}
+close_holt_damp<-holt(window(bit_train,start=2000),h=5,damped = TRUE,phi=0.9)
+
+summary(close_holt_damp)
+
+autoplot(close_holt_damp) +
+  autolayer(fitted(close_holt_damp), series="Fitted") +
+  ylab("Bitcoin Close Price") + xlab("ID number")
+
+```
+
+##### Plotting in Holt's linear method forecasts and Damped Holt's method  forecasts in single graph.
+
+```{r echo=TRUE}
+autoplot(window(bit_train,start=2180)) +
+  autolayer(close_holt, series="Holt's method", PI=FALSE) +
+  autolayer(close_holt_damp, series="Damped Holt's method", PI=FALSE) +
+  ggtitle("Forecasts from Holt's method") + xlab("ID Number") +
+  ylab("Bitcoin Price in USD") +
+  guides(colour=guide_legend(title="Forecast"))
+
+```
+
+### We now proceed to next stage: determing the model parameters using ets() E= Error, T=Trend, S=Seasonal
+
+```{r echo=TRUE}
+bit_train_2000 <- window(bit_train, start=2000)
+model_param <- ets(bit_train_2000,model="ZZZ",damped = TRUE)
+summary(model_param)
+```
+
+* We see alpha=0.895, beta=0.0825, phi=0.9073 
+* The small values of beta mean that the slope and seasonal components change very little over time. The
+narrow prediction intervals indicate that the series is relatively easy to forecast
+due to the strong trend and seasonality.  
+
+```{r echo=TRUE}
+autoplot(model_param)
+model_param %>% forecast(h=8) %>%
+  autoplot() +
+  ylab("Bitcoin Price in USD")
+```
+
